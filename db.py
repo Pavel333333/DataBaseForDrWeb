@@ -1,3 +1,5 @@
+# Тестовое задание
+
 from collections import Counter
 from copy import deepcopy
 
