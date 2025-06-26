@@ -17,6 +17,44 @@ def db_temp() -> dict[str, str]:
     return deep_transactions[-1] if len(deep_transactions) > 0 else db
 
 
+def del_elems_from_db(db: dict[str, str],
+                      history: dict[int, dict[str, list[str]]],
+                      number: int,
+                      ) -> dict[str, str]:
+    """Удаляет элементы из БД в сценарии с командой UNSET.
+    :param db: ДБ, из которой нужно удалить элементы.
+    :param history: История удалений элементов внутри транзакций в виде словаря,
+    где ключ это номер транзакции, а значение это словарь, в котором ведётся
+    лог действий по элементам БД: set и unset.
+    :param number: Номер транзакции (уровень вложенности).
+    :return: Базу после удаления элементов
+    """
+    for k in history[number].keys():
+        if history[number][k][-1] == 'unset':
+            db.pop(k, None)
+    return db
+
+
+def del_elems_from_list_db(list_db: list[dict[str, str]],
+                           history: dict[int, dict[str, list[str]]],
+                           number: int,
+                           ) -> list[dict[str, str]]:
+    """Удаляет элементы из списка транзакци в сценарии с командой UNSET.
+    :param list_db: Список временных БД до команды UNSET.
+    :param history: История удалений элементов внутри транзакций в виде словаря,
+    где ключ это номер транзакции, а значение это словарь, в котором ведётся
+    лог действий по элементам БД: set и unset.
+    :param number: Номер транзакции (уровень вложенности).
+    :return: Список транзакций после команды UNSET.
+    """
+    for db_temp in list_db:
+        del_elems_from_db(db=db_temp,
+                         history=history,
+                         number=number,
+                         )
+    return list_db
+
+
 def run_db() -> None:
     """Запускает основной цикл базы данных с поддержкой команд.
 
@@ -31,6 +69,9 @@ def run_db() -> None:
         COMMIT                 — зафиксировать изменения
         END                    — завершить приложение
     """
+    count_transactions: int = 0
+    transactions_logs: dict[int, dict[str, list[str]]] = {}
+
     while True:
 
         try:
@@ -52,6 +93,9 @@ def run_db() -> None:
                     print('> Повторите ввод и передайте аргумент в виде SET <key> <value>')
                 else:
                     db_temp()[enter[1]] = enter[2]
+                    if count_transactions > 0:
+                        (transactions_logs.setdefault(count_transactions, {}).
+                         setdefault(enter[1], []).append('set'))
             case 'GET':
                 if words != 2:
                     print('> Повторите ввод и передайте аргумент в виде GET <key>')
@@ -61,7 +105,10 @@ def run_db() -> None:
                 if words != 2:
                     print('> Повторите ввод и передайте аргумент в виде UNSET <key>')
                 else:
-                    db_temp().pop(enter[1])
+                    db_temp().pop(enter[1], None)
+                    if count_transactions > 0:
+                        (transactions_logs.setdefault(count_transactions, {}).
+                         setdefault(enter[1], []).append('unset'))
             case 'COUNTS':
                 if words != 2:
                     print('> Повторите ввод и передайте аргумент в виде UNSET <value>')
@@ -75,23 +122,52 @@ def run_db() -> None:
                     find_keys = [key for key, value in db_temp().items() if value == enter[1]]
                     print(', '.join(find_keys))
             case 'BEGIN':
+                count_transactions += 1
                 deep_transactions.append(deepcopy(db_temp()))
             case 'ROLLBACK':
                 if len(deep_transactions) > 0:
+                    transactions_logs.popitem()
+                    count_transactions -= 1
                     deep_transactions.pop()
                 else:
                     print('> Неверная команда')
             case 'COMMIT':
                 if len(deep_transactions) > 1:
+                    if len(transactions_logs) > 0:
+                        del_elems_from_list_db(
+                            list_db=deep_transactions,
+                            history=transactions_logs,
+                            number=count_transactions,
+                        )
+                        del_elems_from_db(
+                            db=db,
+                            history=transactions_logs,
+                            number=count_transactions,
+                        )
+                    transactions_logs.popitem()
+                    count_transactions -= 1
                     deep_transactions[-2].update(deep_transactions[-1])
                     deep_transactions.pop()
                 elif len(deep_transactions) == 1:
+                    if len(transactions_logs) > 0:
+                        del_elems_from_list_db(
+                            list_db=deep_transactions,
+                            history=transactions_logs,
+                            number=count_transactions,
+                        )
+                        del_elems_from_db(
+                            db=db,
+                            history=transactions_logs,
+                            number=count_transactions,
+                        )
+                    transactions_logs.clear()
+                    count_transactions -= 1
                     db.update(deep_transactions[-1])
                     deep_transactions.clear()
                 else:
                     print('> Неверная команда')
             case 'PRINT':
-                print(db, deep_transactions)
+                print(db, deep_transactions, count_transactions, transactions_logs)
             case 'END':
                 break
             case _:
