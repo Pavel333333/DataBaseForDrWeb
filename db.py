@@ -106,7 +106,8 @@ def run_db() -> None:
                     print('> Повторите ввод и передайте аргумент в виде UNSET <key>')
                 else:
                     db_temp().pop(enter[1], None)
-                    if count_transactions > 0:
+                    list_com = transactions_logs.get(count_transactions, {}).get(enter[1], [])
+                    if count_transactions > 0 and list_com and list_com[-1] == 'set':
                         (transactions_logs.setdefault(count_transactions, {}).
                          setdefault(enter[1], []).append('unset'))
             case 'COUNTS':
